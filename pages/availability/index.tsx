@@ -1,333 +1,246 @@
-import Head from 'next/head';
-import Link from 'next/link';
-import prisma from '../../lib/prisma';
-import Modal from '../../components/Modal';
-import Shell from '../../components/Shell';
-import Router from 'next/router';
-import { useRef } from 'react';
-import { useState } from 'react';
-import { useSession, getSession } from 'next-auth/client';
-import { PlusIcon, ClockIcon } from '@heroicons/react/outline';
+import { ClockIcon } from "@heroicons/react/outline";
+import Link from "next/link";
+import { useRouter } from "next/router";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
 
-export default function Availability(props) {
-    const [ session, loading ] = useSession();
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [successModalOpen, setSuccessModalOpen] = useState(false);
-    const [showChangeTimesModal, setShowChangeTimesModal] = useState(false);
-    const titleRef = useRef();
-    const descriptionRef = useRef();
-    const lengthRef = useRef();
+import { useLocale } from "@lib/hooks/useLocale";
+import { useToggleQuery } from "@lib/hooks/useToggleQuery";
+import showToast from "@lib/notification";
+import { trpc } from "@lib/trpc";
 
-    const startHoursRef = useRef();
-    const startMinsRef = useRef();
-    const endHoursRef = useRef();
-    const endMinsRef = useRef();
+import { Dialog, DialogContent } from "@components/Dialog";
+import Loader from "@components/Loader";
+import Shell from "@components/Shell";
+import { Alert } from "@components/ui/Alert";
+import Button from "@components/ui/Button";
 
-    if (loading) {
-        return <p className="text-gray-400">Loading...</p>;
-    } else {
-        if (!session) {
-            window.location.href = "/auth/login";
-        }
-    }
-
-    function toggleAddModal() {
-        setShowAddModal(!showAddModal);
-    }
-
-    function toggleChangeTimesModal() {
-        setShowChangeTimesModal(!showChangeTimesModal);
-    }
-
-    const closeSuccessModal = () => { Router.reload(); }
-
-    function convertMinsToHrsMins (mins) {
-        let h = Math.floor(mins / 60);
-        let m = mins % 60;
-        h = h < 10 ? '0' + h : h;
-        m = m < 10 ? '0' + m : m;
-        return `${h}:${m}`;
-    }
-
-    async function createEventTypeHandler(event) {
-        event.preventDefault();
-
-        const enteredTitle = titleRef.current.value;
-        const enteredDescription = descriptionRef.current.value;
-        const enteredLength = lengthRef.current.value;
-
-        // TODO: Add validation
-
-        const response = await fetch('/api/availability/eventtype', {
-            method: 'POST',
-            body: JSON.stringify({title: enteredTitle, description: enteredDescription, length: enteredLength}),
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (enteredTitle && enteredLength) {
-            Router.reload();
-        }
-    }
-
-    async function updateStartEndTimesHandler(event) {
-        event.preventDefault();
-
-        const enteredStartHours = parseInt(startHoursRef.current.value);
-        const enteredStartMins = parseInt(startMinsRef.current.value);
-        const enteredEndHours = parseInt(endHoursRef.current.value);
-        const enteredEndMins = parseInt(endMinsRef.current.value);
-
-        const startMins = enteredStartHours * 60 + enteredStartMins;
-        const endMins = enteredEndHours * 60 + enteredEndMins;
-
-        // TODO: Add validation
-
-        const response = await fetch('/api/availability/day', {
-            method: 'PATCH',
-            body: JSON.stringify({start: startMins, end: endMins}),
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        setShowChangeTimesModal(false);
-        setSuccessModalOpen(true);
-    }
-
-    return(
-        <div>
-            <Head>
-                <title>Availability | Calendso</title>
-                <link rel="icon" href="/favicon.ico" />
-            </Head>
-            <Shell heading="Availability">
-                <div className="mb-4 sm:flex sm:items-center sm:justify-between">
-                    <h3 className="text-lg leading-6 font-medium text-white">
-                        Event Types
-                    </h3>
-                    <div className="mt-3 sm:mt-0 sm:ml-4">
-                        <button onClick={toggleAddModal} type="button" className="btn-sm btn-primary">
-                            New event type
-                        </button>
-                    </div>
-                </div>
-                <div className="flex flex-col mb-8">
-                    <div className="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-                        <div className="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
-                            <div className="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Name
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Description
-                                            </th>
-                                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Length
-                                            </th>
-                                            <th scope="col" className="relative px-6 py-3">
-                                                <span className="sr-only">Edit</span>
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                        {props.types.map((eventType) => 
-                                            <tr>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                    {eventType.title}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {eventType.description}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {eventType.length} minutes
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                    <Link href={"/availability/event/" + eventType.id}><a className="text-blue-600 hover:text-blue-900">Edit</a></Link>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-white shadow sm:rounded-lg">
-                    <div className="px-4 py-5 sm:p-6">
-                        <h3 className="text-lg leading-6 font-medium text-gray-900">
-                            Change the start and end times of your day
-                        </h3>
-                        <div className="mt-2 max-w-xl text-sm text-gray-500">
-                            <p>
-                                Currently, your day is set to start at {convertMinsToHrsMins(props.user.startTime)} and end at {convertMinsToHrsMins(props.user.endTime)}.
-                            </p>
-                        </div>
-                        <div className="mt-5">
-                            <button onClick={toggleChangeTimesModal} type="button" className="btn btn-primary">
-                                Change available times
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                {showAddModal && 
-                    <div className="fixed z-10 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-                        <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
-
-                            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-
-                            <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
-                                <div className="sm:flex sm:items-start mb-4">
-                                    <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 sm:mx-0 sm:h-10 sm:w-10">
-                                        <PlusIcon className="h-6 w-6 text-blue-600" />
-                                    </div>
-                                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                                        <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                                            Add a new event type
-                                        </h3>
-                                        <div>
-                                            <p className="text-sm text-gray-500">
-                                                Create a new event type for people to book times with.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <form onSubmit={createEventTypeHandler}>
-                                    <div>
-                                        <div className="mb-4">
-                                            <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>
-                                            <div className="mt-1">
-                                                <input ref={titleRef} type="text" name="title" id="title" className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="Quick Chat" />
-                                            </div>
-                                        </div>
-                                        <div className="mb-4">
-                                            <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
-                                            <div className="mt-1">
-                                                <textarea ref={descriptionRef} name="description" id="description" className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="A quick video meeting."></textarea>
-                                            </div>
-                                        </div>
-                                        <div className="mb-4">
-                                            <label htmlFor="length" className="block text-sm font-medium text-gray-700">Length</label>
-                                            <div className="mt-1 relative rounded-md shadow-sm">
-                                                <input ref={lengthRef} type="number" name="length" id="length" className="focus:ring-blue-500 focus:border-blue-500 block w-full pr-20 sm:text-sm border-gray-300 rounded-md" placeholder="15" />
-                                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 text-sm">
-                                                    minutes
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {/* TODO: Add an error message when required input fields empty*/}
-                                    <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
-                                        <button type="submit" className="btn btn-primary">
-                                            Create
-                                        </button>
-                                        <button onClick={toggleAddModal} type="button" className="btn btn-white mr-2">
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                }
-                {showChangeTimesModal && 
-                    <div className="fixed z-10 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-                        <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
-
-                            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-
-                            <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
-                                <div className="sm:flex sm:items-start mb-4">
-                                    <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 sm:mx-0 sm:h-10 sm:w-10">
-                                        <ClockIcon className="h-6 w-6 text-blue-600" />
-                                    </div>
-                                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                                        <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                                            Change your available times
-                                        </h3>
-                                        <div>
-                                            <p className="text-sm text-gray-500">
-                                                Set the start and end time of your day.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <form onSubmit={updateStartEndTimesHandler}>
-                                    <div className="flex mb-4">
-                                        <label className="w-1/4 pt-2 block text-sm font-medium text-gray-700">Start time</label>
-                                        <div>
-                                            <label htmlFor="hours" className="sr-only">Hours</label>
-                                            <input ref={startHoursRef} type="number" name="hours" id="hours" className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="9" defaultValue={convertMinsToHrsMins(props.user.startTime).split(":")[0]} />
-                                        </div>
-                                        <span className="mx-2 pt-1">:</span>
-                                        <div>
-                                            <label htmlFor="minutes" className="sr-only">Minutes</label>
-                                            <input ref={startMinsRef} type="number" name="minutes" id="minutes" className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="30" defaultValue={convertMinsToHrsMins(props.user.startTime).split(":")[1]} />
-                                        </div>
-                                    </div>
-                                    <div className="flex">
-                                        <label className="w-1/4 pt-2 block text-sm font-medium text-gray-700">End time</label>
-                                        <div>
-                                            <label htmlFor="hours" className="sr-only">Hours</label>
-                                            <input ref={endHoursRef} type="number" name="hours" id="hours" className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="17" defaultValue={convertMinsToHrsMins(props.user.endTime).split(":")[0]} />
-                                        </div>
-                                        <span className="mx-2 pt-1">:</span>
-                                        <div>
-                                            <label htmlFor="minutes" className="sr-only">Minutes</label>
-                                            <input ref={endMinsRef} type="number" name="minutes" id="minutes" className="shadow-sm focus:ring-blue-500 focus:border-blue-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="30" defaultValue={convertMinsToHrsMins(props.user.endTime).split(":")[1]} />
-                                        </div>
-                                    </div>
-                                    <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
-                                        <button type="submit" className="btn btn-primary">
-                                            Update
-                                        </button>
-                                        <button onClick={toggleChangeTimesModal} type="button" className="btn btn-white mr-2">
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                }
-                <Modal heading="Start and end times changed" description="The start and end times for your day have been changed successfully." open={successModalOpen} handleClose={closeSuccessModal} />
-            </Shell>
-        </div>
-    );
+function convertMinsToHrsMins(mins: number) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const hours = h < 10 ? "0" + h : h;
+  const minutes = m < 10 ? "0" + m : m;
+  return `${hours}:${minutes}`;
 }
+export default function Availability() {
+  const { t } = useLocale();
+  const queryMe = trpc.useQuery(["viewer.me"]);
+  const formModal = useToggleQuery("edit");
 
-export async function getServerSideProps(context) {
-    const session = await getSession(context);
+  const formMethods = useForm<{
+    startHours: string;
+    startMins: string;
+    endHours: string;
+    endMins: string;
+    bufferHours: string;
+    bufferMins: string;
+  }>({});
+  const router = useRouter();
 
-    const user = await prisma.user.findFirst({
-        where: {
-            email: session.user.email,
-        },
-        select: {
-            id: true,
-            startTime: true,
-            endTime: true
-        }
-    });
-
-    const types = await prisma.eventType.findMany({
-        where: {
-            userId: user.id,
-        },
-        select: {
-            id: true,
-            title: true,
-            description: true,
-            length: true
-        }
-    });
-    return {
-      props: {user, types}, // will be passed to the page component as props
+  useEffect(() => {
+    /**
+     * This hook populates the form with new values as soon as the user is loaded or changes
+     */
+    const user = queryMe.data;
+    if (formMethods.formState.isDirty || !user) {
+      return;
     }
+    formMethods.reset({
+      startHours: convertMinsToHrsMins(user.startTime).split(":")[0],
+      startMins: convertMinsToHrsMins(user.startTime).split(":")[1],
+      endHours: convertMinsToHrsMins(user.endTime).split(":")[0],
+      endMins: convertMinsToHrsMins(user.endTime).split(":")[1],
+      bufferHours: convertMinsToHrsMins(user.bufferTime).split(":")[0],
+      bufferMins: convertMinsToHrsMins(user.bufferTime).split(":")[1],
+    });
+  }, [formMethods, queryMe.data]);
+
+  if (queryMe.status === "loading") {
+    return <Loader />;
+  }
+  if (queryMe.status !== "success") {
+    return <Alert severity="error" title={t("something_went_wrong")} />;
+  }
+  const user = queryMe.data;
+
+  return (
+    <div>
+      <Shell heading={t("availability")} subtitle={t("configure_availability")}>
+        <div className="flex">
+          <div className="w-1/2 mr-2 bg-white border border-gray-200 rounded-sm">
+            <div className="px-4 py-5 sm:p-6">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">{t("change_start_end")}</h3>
+              <div className="mt-2 max-w-xl text-sm text-gray-500">
+                <p>
+                  {t("current_start_date")} {convertMinsToHrsMins(user.startTime)} {t("and_end_at")}{" "}
+                  {convertMinsToHrsMins(user.endTime)}.
+                </p>
+              </div>
+              <div className="mt-5">
+                <Button href={formModal.hrefOn}>{t("change_available_times")}</Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-1/2 ml-2 border border-gray-200 rounded-sm">
+            <div className="px-4 py-5 sm:p-6">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
+                {t("something_doesnt_look_right")}
+              </h3>
+              <div className="mt-2 max-w-xl text-sm text-gray-500">
+                <p>{t("troubleshoot_availability")}</p>
+              </div>
+              <div className="mt-5">
+                <Link href="/availability/troubleshoot">
+                  <a className="btn btn-white">{t("launch_troubleshooter")}</a>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Dialog
+          open={formModal.isOn}
+          onOpenChange={(isOpen) => {
+            router.push(isOpen ? formModal.hrefOn : formModal.hrefOff);
+          }}>
+          <DialogContent>
+            <div className="sm:flex sm:items-start mb-4">
+              <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-neutral-100 sm:mx-0 sm:h-10 sm:w-10">
+                <ClockIcon className="h-6 w-6 text-neutral-600" />
+              </div>
+              <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                  {t("change_your_available_times")}
+                </h3>
+                <div>
+                  <p className="text-sm text-gray-500">{t("change_start_end_buffer")}</p>
+                </div>
+              </div>
+            </div>
+            <form
+              onSubmit={formMethods.handleSubmit(async (values) => {
+                const startMins = parseInt(values.startHours) * 60 + parseInt(values.startMins);
+                const endMins = parseInt(values.endHours) * 60 + parseInt(values.endMins);
+                const bufferMins = parseInt(values.bufferHours) * 60 + parseInt(values.bufferMins);
+
+                // TODO: Add validation
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const response = await fetch("/api/availability/day", {
+                  method: "PATCH",
+                  body: JSON.stringify({ start: startMins, end: endMins, buffer: bufferMins }),
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                });
+                if (!response.ok) {
+                  showToast(t("something_went_wrong"), "error");
+                  return;
+                }
+                await queryMe.refetch();
+                router.push(formModal.hrefOff);
+
+                showToast(t("start_end_changed_successfully"), "success");
+              })}>
+              <div className="flex mb-4">
+                <label className="w-1/4 pt-2 block text-sm font-medium text-gray-700">
+                  {t("start_time")}
+                </label>
+                <div>
+                  <label htmlFor="startHours" className="sr-only">
+                    {t("hours")}
+                  </label>
+                  <input
+                    {...formMethods.register("startHours")}
+                    id="startHours"
+                    type="number"
+                    className="shadow-sm focus:ring-neutral-500 focus:border-neutral-500 block w-full sm:text-sm border-gray-300 rounded-sm"
+                    placeholder="9"
+                    defaultValue={convertMinsToHrsMins(user.startTime).split(":")[0]}
+                  />
+                </div>
+                <span className="mx-2 pt-1">:</span>
+                <div>
+                  <label htmlFor="startMins" className="sr-only">
+                    {t("minutes")}
+                  </label>
+                  <input
+                    {...formMethods.register("startMins")}
+                    id="startMins"
+                    type="number"
+                    className="shadow-sm focus:ring-neutral-500 focus:border-neutral-500 block w-full sm:text-sm border-gray-300 rounded-sm"
+                    placeholder="30"
+                  />
+                </div>
+              </div>
+              <div className="flex mb-4">
+                <label className="w-1/4 pt-2 block text-sm font-medium text-gray-700">{t("end_time")}</label>
+                <div>
+                  <label htmlFor="endHours" className="sr-only">
+                    {t("hours")}
+                  </label>
+                  <input
+                    {...formMethods.register("endHours")}
+                    type="number"
+                    id="endHours"
+                    className="shadow-sm focus:ring-neutral-500 focus:border-neutral-500 block w-full sm:text-sm border-gray-300 rounded-sm"
+                    placeholder="17"
+                  />
+                </div>
+                <span className="mx-2 pt-1">:</span>
+                <div>
+                  <label htmlFor="endMins" className="sr-only">
+                    {t("minutes")}
+                  </label>
+                  <input
+                    {...formMethods.register("endMins")}
+                    type="number"
+                    id="endMins"
+                    className="shadow-sm focus:ring-neutral-500 focus:border-neutral-500 block w-full sm:text-sm border-gray-300 rounded-sm"
+                    placeholder="30"
+                  />
+                </div>
+              </div>
+              <div className="flex mb-4">
+                <label className="w-1/4 pt-2 block text-sm font-medium text-gray-700">{t("buffer")}</label>
+                <div>
+                  <label htmlFor="bufferHours" className="sr-only">
+                    {t("hours")}
+                  </label>
+                  <input
+                    {...formMethods.register("bufferHours")}
+                    type="number"
+                    id="bufferHours"
+                    className="shadow-sm focus:ring-neutral-500 focus:border-neutral-500 block w-full sm:text-sm border-gray-300 rounded-sm"
+                    placeholder="0"
+                  />
+                </div>
+                <span className="mx-2 pt-1">:</span>
+                <div>
+                  <label htmlFor="bufferMins" className="sr-only">
+                    {t("minutes")}
+                  </label>
+                  <input
+                    {...formMethods.register("bufferMins")}
+                    type="number"
+                    id="bufferMins"
+                    className="shadow-sm focus:ring-neutral-500 focus:border-neutral-500 block w-full sm:text-sm border-gray-300 rounded-sm"
+                    placeholder="10"
+                  />
+                </div>
+              </div>
+              <div className="mt-5 sm:mt-4 sm:flex space-x-2">
+                <Button href={formModal.hrefOff} color="secondary" tabIndex={-1}>
+                  {t("cancel")}
+                </Button>
+                <Button type="submit" loading={formMethods.formState.isSubmitting}>
+                  {t("update")}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </Shell>
+    </div>
+  );
 }

@@ -1,218 +1,430 @@
-import Head from 'next/head';
-import Link from 'next/link';
-import prisma from '../../lib/prisma';
-import Shell from '../../components/Shell';
-import { useState } from 'react';
-import { useSession, getSession } from 'next-auth/client';
-import { CheckCircleIcon, XCircleIcon, ChevronRightIcon, PlusIcon } from '@heroicons/react/solid';
-import { InformationCircleIcon } from '@heroicons/react/outline';
+import Image from "next/image";
+import { Fragment, ReactNode, useState } from "react";
+import { useMutation } from "react-query";
 
-export default function Home(props) {
-    const [session, loading] = useSession();
-    const [showAddModal, setShowAddModal] = useState(false);
+import { QueryCell } from "@lib/QueryCell";
+import classNames from "@lib/classNames";
+import { AddAppleIntegrationModal } from "@lib/integrations/Apple/components/AddAppleIntegration";
+import { AddCalDavIntegrationModal } from "@lib/integrations/CalDav/components/AddCalDavIntegration";
+import showToast from "@lib/notification";
+import { trpc } from "@lib/trpc";
 
-    if (loading) {
-        return <p className="text-gray-400">Loading...</p>;
-    } else {
-        if (!session) {
-            window.location.href = "/";
-        }
-    }
+import { Dialog } from "@components/Dialog";
+import { List, ListItem, ListItemText, ListItemTitle } from "@components/List";
+import Shell, { ShellSubHeading } from "@components/Shell";
+import ConfirmationDialogContent from "@components/dialog/ConfirmationDialogContent";
+import { Alert } from "@components/ui/Alert";
+import Badge from "@components/ui/Badge";
+import Button, { ButtonBaseProps } from "@components/ui/Button";
+import Switch from "@components/ui/Switch";
 
-    function toggleAddModal() {
-        setShowAddModal(!showAddModal);
-    }
-
-    function integrationHandler(type) {
-        fetch('/api/integrations/' + type + '/add')
-            .then((response) => response.json())
-            .then((data) => window.location.href = data.url);
-    }
-
-    return (
-        <div>
-            <Head>
-                <title>Integrations | Calendso</title>
-                <link rel="icon" href="/favicon.ico" />
-            </Head>
-
-            <Shell heading="Integrations">
-                <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-                    <ul className="divide-y divide-gray-200">
-                        {props.credentials.map((integration) =>
-                            <li>
-                                <Link href={"/integrations/" + integration.id}>
-                                    <a className="block hover:bg-gray-50">
-                                        <div className="flex items-center px-4 py-4 sm:px-6">
-                                            <div className="min-w-0 flex-1 flex items-center">
-                                                <div className="flex-shrink-0">
-                                                    {integration.type == 'google_calendar' && <img className="h-10 w-10 mr-2" src="integrations/google-calendar.png" alt="Google Calendar" />}
-                                                    {integration.type == 'office365_calendar' && <img className="h-10 w-10 mr-2" src="integrations/office-365.png" alt="Office 365 / Outlook.com Calendar" />}
-                                                </div>
-                                                <div className="min-w-0 flex-1 px-4 md:grid md:grid-cols-2 md:gap-4">
-                                                    <div>
-                                                        {integration.type == 'google_calendar' && <p className="text-sm font-medium text-blue-600 truncate">Google Calendar</p>}
-                                                        {integration.type == 'office365_calendar' && <p className="text-sm font-medium text-blue-600 truncate">Office365 / Outlook.com Calendar</p>}
-                                                        <p className="flex items-center text-sm text-gray-500">
-                                                            {integration.type.endsWith('_calendar') && <span className="truncate">Calendar Integration</span>}
-                                                        </p>
-                                                    </div>
-                                                    <div className="hidden md:block">
-                                                        <div>
-                                                            {integration.key &&
-                                                                <p className="mt-2 flex items-center text text-gray-500">
-                                                                    <CheckCircleIcon className="flex-shrink-0 mr-1.5 h-5 w-5 text-green-400" />
-                                                                    Connected
-                                                                </p>
-                                                            }
-                                                            {!integration.key &&
-                                                                <p className="mt-3 flex items-center text text-gray-500">
-                                                                    <XCircleIcon className="flex-shrink-0 mr-1.5 h-5 w-5 text-yellow-400" />
-                                                                Not connected
-                                                            </p>
-                                                            }
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <ChevronRightIcon className="h-5 w-5 text-gray-400" />
-                                            </div>
-                                        </div>
-                                    </a>
-                                </Link>
-                            </li>
-                        )}
-                    </ul>
-                    {props.credentials.length == 0 &&
-                        <div className="bg-white shadow sm:rounded-lg">
-                            <div className="flex">
-                                <div className="py-9 pl-8">
-                                    <InformationCircleIcon className="text-blue-600 w-16" />
-                                </div>
-                                <div className="py-5 sm:p-6">
-                                    <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                        You don't have any integrations added.
-                                    </h3>
-                                    <div className="mt-2 text-sm text-gray-500">
-                                        <p>
-                                            You currently do not have any integrations set up. Add your first integration to get started.
-                                        </p>
-                                    </div>
-                                    <div className="mt-3 text-sm">
-                                        <button onClick={toggleAddModal} className="font-medium text-blue-600 hover:text-blue-500"> Add your first integration <span aria-hidden="true">&rarr;</span></button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    }
-                </div>
-                {showAddModal &&
-                    <div className="fixed z-10 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-                    <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                        {/* <!--
-                          Background overlay, show/hide based on modal state.
-
-                          Entering: "ease-out duration-300"
-                            From: "opacity-0"
-                            To: "opacity-100"
-                          Leaving: "ease-in duration-200"
-                            From: "opacity-100"
-                            To: "opacity-0"
-                        --> */}
-                        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
-                        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-                        {/* <!--
-                          Modal panel, show/hide based on modal state.
-
-                          Entering: "ease-out duration-300"
-                            From: "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
-                            To: "opacity-100 translate-y-0 sm:scale-100"
-                          Leaving: "ease-in duration-200"
-                            From: "opacity-100 translate-y-0 sm:scale-100"
-                            To: "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
-                        --> */}
-                        <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
-                            <div className="sm:flex sm:items-start">
-                                <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 sm:mx-0 sm:h-10 sm:w-10">
-                                    <PlusIcon className="h-6 w-6 text-blue-600" />
-                                </div>
-                                <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                                    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                                        Add a new integration
-                                    </h3>
-                                    <div>
-                                        <p className="text-sm text-gray-400">
-                                            Link a new integration to your account.
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="my-4">
-                                <ul className="divide-y divide-gray-200">
-                                    <li className="flex py-4">
-                                        <div className="w-1/12 mr-4 pt-2">
-                                            <img className="h-8 w-8 mr-2" src="integrations/office-365.png" alt="Office 365 / Outlook.com Calendar" />
-                                        </div>
-                                        <div className="w-10/12">
-                                            <h2 className="text-gray-800 font-medium">Office 365 / Outlook.com Calendar</h2>
-                                            <p className="text-gray-400 text-sm">For personal and business accounts</p>
-                                        </div>
-                                        <div className="w-2/12 text-right pt-2">
-                                            <button onClick={() => integrationHandler('office365calendar')} className="font-medium text-blue-600 hover:text-blue-500">Add</button>
-                                        </div>
-                                    </li>
-                                    <li className="flex py-4">
-                                        <div className="w-1/12 mr-4 pt-2">
-                                            <img className="h-8 w-8 mr-2" src="integrations/google-calendar.png" alt="Google Calendar" />
-                                        </div>
-                                        <div className="w-10/12">
-                                            <h2 className="text-gray-800 font-medium">Google Calendar</h2>
-                                            <p className="text-gray-400 text-sm">For personal and business accounts</p>
-                                        </div>
-                                        <div className="w-2/12 text-right pt-2">
-                                            <button onClick={() => integrationHandler('googlecalendar')} className="font-medium text-blue-600 hover:text-blue-500">Add</button>
-                                        </div>
-                                    </li>
-                                </ul>
-                            </div>
-                            <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
-                                <button onClick={toggleAddModal} type="button" className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:w-auto sm:text-sm">
-                                    Close
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                }
-            </Shell>
-        </div>
-    );
+function pluralize(opts: { num: number; plural: string; singular: string }) {
+  if (opts.num === 0) {
+    return opts.singular;
+  }
+  return opts.singular;
 }
 
-export async function getServerSideProps(context) {
-    const session = await getSession(context);
+function SubHeadingTitleWithConnections(props: { title: ReactNode; numConnections?: number }) {
+  const num = props.numConnections;
+  return (
+    <>
+      <span>{props.title}</span>
+      {num ? (
+        <Badge variant="success">
+          {num}{" "}
+          {pluralize({
+            num,
+            singular: "connection",
+            plural: "connections",
+          })}
+        </Badge>
+      ) : null}
+    </>
+  );
+}
 
-    const user = await prisma.user.findFirst({
-        where: {
-            email: session.user.email,
-        },
-        select: {
-            id: true
-        }
-    });
-
-    const credentials = await prisma.credential.findMany({
-        where: {
-            userId: user.id,
-        },
-        select: {
-            id: true,
-            type: true,
-            key: true
-        }
-    });
-    return {
-      props: {credentials}, // will be passed to the page component as props
+function ConnectIntegration(props: { type: string; render: (renderProps: ButtonBaseProps) => JSX.Element }) {
+  const { type } = props;
+  const [isLoading, setIsLoading] = useState(false);
+  const mutation = useMutation(async () => {
+    const res = await fetch("/api/integrations/" + type.replace("_", "") + "/add");
+    if (!res.ok) {
+      throw new Error("Something went wrong");
     }
+    const json = await res.json();
+    window.location.href = json.url;
+    setIsLoading(true);
+  });
+  const [isModalOpen, _setIsModalOpen] = useState(false);
+  const utils = trpc.useContext();
+
+  const setIsModalOpen: typeof _setIsModalOpen = (v) => {
+    _setIsModalOpen(v);
+    // refetch intergrations on modal toggles
+
+    utils.invalidateQueries(["viewer.integrations"]);
+  };
+
+  return (
+    <>
+      {props.render({
+        onClick() {
+          if (["caldav_calendar", "apple_calendar"].includes(type)) {
+            // special handlers
+            setIsModalOpen(true);
+            return;
+          }
+
+          mutation.mutate();
+        },
+        loading: mutation.isLoading || isLoading,
+        disabled: isModalOpen,
+      })}
+      {type === "caldav_calendar" && (
+        <AddCalDavIntegrationModal open={isModalOpen} onOpenChange={setIsModalOpen} />
+      )}
+
+      {type === "apple_calendar" && (
+        <AddAppleIntegrationModal open={isModalOpen} onOpenChange={setIsModalOpen} />
+      )}
+    </>
+  );
+}
+
+function DisconnectIntegration(props: {
+  /**
+   * Integration credential id
+   */
+  id: number;
+  render: (renderProps: ButtonBaseProps) => JSX.Element;
+}) {
+  const utils = trpc.useContext();
+  const [modalOpen, setModalOpen] = useState(false);
+  const mutation = useMutation(
+    async () => {
+      const res = await fetch("/api/integrations", {
+        method: "DELETE",
+        body: JSON.stringify({ id: props.id }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      if (!res.ok) {
+        throw new Error("Something went wrong");
+      }
+    },
+    {
+      async onSettled() {
+        await utils.invalidateQueries(["viewer.integrations"]);
+      },
+      onSuccess() {
+        setModalOpen(false);
+      },
+    }
+  );
+  return (
+    <>
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <ConfirmationDialogContent
+          variety="danger"
+          title="Disconnect Integration"
+          confirmBtnText="Yes, disconnect integration"
+          cancelBtnText="Cancel"
+          onConfirm={() => {
+            mutation.mutate();
+          }}>
+          Are you sure you want to disconnect this integration?
+        </ConfirmationDialogContent>
+      </Dialog>
+      {props.render({
+        onClick() {
+          setModalOpen(true);
+        },
+        disabled: modalOpen,
+        loading: mutation.isLoading,
+      })}
+    </>
+  );
+}
+
+function ConnectOrDisconnectIntegrationButton(props: {
+  //
+  credentialIds: number[];
+  type: string;
+  installed: boolean;
+}) {
+  const [credentialId] = props.credentialIds;
+  if (credentialId) {
+    return (
+      <DisconnectIntegration
+        id={credentialId}
+        render={(btnProps) => (
+          <Button {...btnProps} color="warn">
+            Disconnect
+          </Button>
+        )}
+      />
+    );
+  }
+  if (!props.installed) {
+    return (
+      <div className="flex items-center truncate">
+        <Alert severity="warning" title="Not installed" />
+      </div>
+    );
+  }
+  /** We don't need to "Connect", just show that it's installed */
+  if (props.type === "daily_video") {
+    return (
+      <div className="px-3 py-2 truncate">
+        <h3 className="text-sm font-medium text-gray-700">Installed</h3>
+      </div>
+    );
+  }
+  return (
+    <ConnectIntegration
+      type={props.type}
+      render={(btnProps) => (
+        <Button color="secondary" {...btnProps}>
+          Connect
+        </Button>
+      )}
+    />
+  );
+}
+
+function IntegrationListItem(props: {
+  imageSrc: string;
+  title: string;
+  description: string;
+  actions?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <ListItem expanded={!!props.children} className={classNames("flex-col")}>
+      <div className={classNames("flex flex-1 space-x-2 w-full p-3 items-center")}>
+        <Image width={40} height={40} src={`/${props.imageSrc}`} alt={props.title} />
+        <div className="flex-grow pl-2 truncate">
+          <ListItemTitle component="h3">{props.title}</ListItemTitle>
+          <ListItemText component="p">{props.description}</ListItemText>
+        </div>
+        <div>{props.actions}</div>
+      </div>
+      {props.children && <div className="w-full border-t border-gray-200">{props.children}</div>}
+    </ListItem>
+  );
+}
+
+export function CalendarSwitch(props: {
+  type: string;
+  externalId: string;
+  title: string;
+  defaultSelected: boolean;
+}) {
+  const utils = trpc.useContext();
+
+  const mutation = useMutation<
+    unknown,
+    unknown,
+    {
+      isOn: boolean;
+    }
+  >(
+    async ({ isOn }) => {
+      const body = {
+        integration: props.type,
+        externalId: props.externalId,
+      };
+      if (isOn) {
+        const res = await fetch("/api/availability/calendar", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          throw new Error("Something went wrong");
+        }
+      } else {
+        const res = await fetch("/api/availability/calendar", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          throw new Error("Something went wrong");
+        }
+      }
+    },
+    {
+      async onSettled() {
+        await utils.invalidateQueries(["viewer.integrations"]);
+      },
+      onError() {
+        showToast(`Something went wrong when toggling "${props.title}""`, "error");
+      },
+    }
+  );
+  return (
+    <div className="py-1">
+      <Switch
+        key={props.externalId}
+        name="enabled"
+        label={props.title}
+        defaultChecked={props.defaultSelected}
+        onCheckedChange={(isOn: boolean) => {
+          mutation.mutate({ isOn });
+        }}
+      />
+    </div>
+  );
+}
+
+export default function IntegrationsPage() {
+  const query = trpc.useQuery(["viewer.integrations"]);
+
+  return (
+    <Shell heading="Integrations" subtitle="Connect your favourite apps.">
+      <QueryCell
+        query={query}
+        success={({ data }) => {
+          return (
+            <>
+              <ShellSubHeading
+                title={
+                  <SubHeadingTitleWithConnections
+                    title="Conferencing"
+                    numConnections={data.conferencing.numActive}
+                  />
+                }
+              />
+              <List>
+                {data.conferencing.items.map((item) => (
+                  <IntegrationListItem
+                    key={item.title}
+                    {...item}
+                    actions={<ConnectOrDisconnectIntegrationButton {...item} />}
+                  />
+                ))}
+              </List>
+
+              <ShellSubHeading
+                className="mt-10"
+                title={
+                  <SubHeadingTitleWithConnections title="Payment" numConnections={data.payment.numActive} />
+                }
+              />
+              <List>
+                {data.payment.items.map((item) => (
+                  <IntegrationListItem
+                    key={item.title}
+                    {...item}
+                    actions={<ConnectOrDisconnectIntegrationButton {...item} />}
+                  />
+                ))}
+              </List>
+
+              <ShellSubHeading
+                className="mt-10"
+                title={
+                  <SubHeadingTitleWithConnections
+                    title="Calendars"
+                    numConnections={data.calendar.numActive}
+                  />
+                }
+                subtitle={
+                  <>
+                    Configure how your links integrate with your calendars.
+                    <br />
+                    You can override these settings on a per event basis.
+                  </>
+                }
+              />
+
+              {data.connectedCalendars.length > 0 && (
+                <>
+                  <List>
+                    {data.connectedCalendars.map((item) => (
+                      <Fragment key={item.credentialId}>
+                        {item.calendars ? (
+                          <IntegrationListItem
+                            {...item.integration}
+                            description={item.primary.externalId}
+                            actions={
+                              <DisconnectIntegration
+                                id={item.credentialId}
+                                render={(btnProps) => (
+                                  <Button {...btnProps} color="warn">
+                                    Disconnect
+                                  </Button>
+                                )}
+                              />
+                            }>
+                            <ul className="p-4 space-y-2">
+                              {item.calendars.map((cal) => (
+                                <CalendarSwitch
+                                  key={cal.externalId}
+                                  externalId={cal.externalId}
+                                  title={cal.name}
+                                  type={item.integration.type}
+                                  defaultSelected={cal.isSelected}
+                                />
+                              ))}
+                            </ul>
+                          </IntegrationListItem>
+                        ) : (
+                          <Alert
+                            severity="warning"
+                            title="Something went wrong"
+                            message={item.error.message}
+                            actions={
+                              <DisconnectIntegration
+                                id={item.credentialId}
+                                render={(btnProps) => (
+                                  <Button {...btnProps} color="warn">
+                                    Disconnect
+                                  </Button>
+                                )}
+                              />
+                            }
+                          />
+                        )}
+                      </Fragment>
+                    ))}
+                  </List>
+                  <ShellSubHeading
+                    className="mt-6"
+                    title={<SubHeadingTitleWithConnections title="Connect an additional calendar" />}
+                  />
+                </>
+              )}
+              <List>
+                {data.calendar.items.map((item) => (
+                  <IntegrationListItem
+                    key={item.title}
+                    {...item}
+                    actions={
+                      <ConnectIntegration
+                        type={item.type}
+                        render={(btnProps) => (
+                          <Button color="secondary" {...btnProps}>
+                            Connect
+                          </Button>
+                        )}
+                      />
+                    }
+                  />
+                ))}
+              </List>
+            </>
+          );
+        }}
+      />
+    </Shell>
+  );
 }

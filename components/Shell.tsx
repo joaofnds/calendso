@@ -1,140 +1,390 @@
-import Link from 'next/link';
-import { useState } from "react";
+import { SelectorIcon } from "@heroicons/react/outline";
+import {
+  CalendarIcon,
+  ClockIcon,
+  CogIcon,
+  ExternalLinkIcon,
+  LinkIcon,
+  LogoutIcon,
+  PuzzleIcon,
+} from "@heroicons/react/solid";
+import { signOut, useSession } from "next-auth/client";
+import Link from "next/link";
 import { useRouter } from "next/router";
-import { signOut, useSession } from 'next-auth/client';
-import { MenuIcon, XIcon } from '@heroicons/react/outline';
+import React, { ReactNode, useEffect } from "react";
+import { Toaster } from "react-hot-toast";
 
-export default function Shell(props) {
-    const router = useRouter();
-    const [ session, loading ] = useSession();
-    const [ profileDropdownExpanded, setProfileDropdownExpanded ] = useState(false);
-    const [ mobileMenuExpanded, setMobileMenuExpanded ] = useState(false);
+import LicenseBanner from "@ee/components/LicenseBanner";
+import HelpMenuItemDynamic from "@ee/lib/intercom/HelpMenuItemDynamic";
 
-    const toggleProfileDropdown = () => {
-        setProfileDropdownExpanded(!profileDropdownExpanded);
+import classNames from "@lib/classNames";
+import { shouldShowOnboarding } from "@lib/getting-started";
+import { useLocale } from "@lib/hooks/useLocale";
+import { collectPageParameters, telemetryEventTypes, useTelemetry } from "@lib/telemetry";
+import { trpc } from "@lib/trpc";
+
+import Loader from "@components/Loader";
+import { HeadSeo } from "@components/seo/head-seo";
+import Avatar from "@components/ui/Avatar";
+import Dropdown, {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@components/ui/Dropdown";
+
+import { useViewerI18n } from "./I18nLanguageHandler";
+import Logo from "./Logo";
+
+function useMeQuery() {
+  const meQuery = trpc.useQuery(["viewer.me"]);
+
+  return meQuery;
+}
+
+function useRedirectToLoginIfUnauthenticated() {
+  const [session, loading] = useSession();
+  const router = useRouter();
+  const query = useMeQuery();
+
+  useEffect(() => {
+    if (!loading && !session) {
+      router.replace({
+        pathname: "/auth/login",
+        query: {
+          callbackUrl: `${location.pathname}${location.search}`,
+        },
+      });
     }
+  }, [loading, session, router]);
 
-    const toggleMobileMenu = () => {
-        setMobileMenuExpanded(!mobileMenuExpanded);
+  if (query.status !== "loading" && !query.data) {
+    router.replace("/auth/login");
+  }
+}
+
+function useRedirectToOnboardingIfNeeded() {
+  const [session, loading] = useSession();
+  const router = useRouter();
+  const query = useMeQuery();
+  const user = query.data;
+
+  useEffect(() => {
+    if (!loading && user) {
+      if (shouldShowOnboarding(user)) {
+        router.replace({
+          pathname: "/getting-started",
+        });
+      }
     }
+  }, [loading, session, router, user]);
+}
 
-    const logoutHandler = () => {
-        signOut();
-        router.push('/');
-    }
+export function ShellSubHeading(props: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={classNames("block sm:flex justify-between mb-3", props.className)}>
+      <div>
+        <h2 className="flex items-center content-center space-x-2 text-base font-bold text-gray-900 leading-6">
+          {props.title}
+        </h2>
+        {props.subtitle && <p className="mr-4 text-sm text-neutral-500">{props.subtitle}</p>}
+      </div>
+      {props.actions && <div className="flex-shrink-0 mb-4">{props.actions}</div>}
+    </div>
+  );
+}
 
+export default function Shell(props: {
+  centered?: boolean;
+  title?: string;
+  heading: ReactNode;
+  subtitle?: ReactNode;
+  children: ReactNode;
+  CTA?: ReactNode;
+}) {
+  const { t } = useLocale();
+  const router = useRouter();
+  useRedirectToLoginIfUnauthenticated();
+  useRedirectToOnboardingIfNeeded();
+
+  const telemetry = useTelemetry();
+
+  const navigation = [
+    {
+      name: t("event_types_page_title"),
+      href: "/event-types",
+      icon: LinkIcon,
+      current: router.asPath.startsWith("/event-types"),
+    },
+    {
+      name: t("bookings"),
+      href: "/bookings/upcoming",
+      icon: ClockIcon,
+      current: router.asPath.startsWith("/bookings"),
+    },
+    {
+      name: t("availability"),
+      href: "/availability",
+      icon: CalendarIcon,
+      current: router.asPath.startsWith("/availability"),
+    },
+    {
+      name: t("integrations"),
+      href: "/integrations",
+      icon: PuzzleIcon,
+      current: router.asPath.startsWith("/integrations"),
+    },
+    {
+      name: t("settings"),
+      href: "/settings/profile",
+      icon: CogIcon,
+      current: router.asPath.startsWith("/settings"),
+    },
+  ];
+
+  useEffect(() => {
+    telemetry.withJitsu((jitsu) => {
+      return jitsu.track(telemetryEventTypes.pageView, collectPageParameters(router.asPath));
+    });
+  }, [telemetry, router.asPath]);
+
+  const pageTitle = typeof props.heading === "string" ? props.heading : props.title;
+
+  const i18n = useViewerI18n();
+
+  if (i18n.status === "loading") {
+    // show spinner whilst i18n is loading to avoid language flicker
     return (
-        <div>
-            <div className="bg-gray-800 pb-32">
-                <nav className="bg-gray-800">
-                    <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
-                        <div className="border-b border-gray-700">
-                            <div className="flex items-center justify-between h-16 px-4 sm:px-0">
-                                <div className="flex items-center">
-                                    <div className="flex-shrink-0">
-                                        <img className="h-6" src="/calendso-white.svg" alt="Calendso" />
-                                    </div>
-                                    <div className="hidden md:block">
-                                        <div className="ml-10 flex items-baseline space-x-4">
-                                            <Link href="/">
-                                                <a className={router.pathname == "/" ? "bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"}>Dashboard</a>
-                                            </Link>
-                                            {/* <Link href="/">
-                                                <a className={router.pathname.startsWith("/bookings") ? "bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"}>Bookings</a>
-                                            </Link> */}
-                                            <Link href="/availability">
-                                                <a className={router.pathname.startsWith("/availability") ? "bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"}>Availability</a>
-                                            </Link>
-                                            <Link href="/integrations">
-                                                <a className={router.pathname.startsWith("/integrations") ? "bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"}>Integrations</a>
-                                            </Link>
-                                            <Link href="/settings">
-                                                <a className={router.pathname.startsWith("/settings") ? "bg-gray-700 text-white px-3 py-2 rounded-md text-sm font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"}>Settings</a>
-                                            </Link>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="hidden md:block">
-                                    <div className="ml-4 flex items-center md:ml-6">
-                                        <div className="ml-3 relative">
-                                            <div>
-                                                <button onClick={toggleProfileDropdown} type="button" className="max-w-xs bg-gray-800 rounded-full flex items-center text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white" id="user-menu" aria-expanded="false" aria-haspopup="true">
-                                                    <span className="sr-only">Open user menu</span>
-                                                    <img className="h-8 w-8 rounded-full" src={"https://eu.ui-avatars.com/api/?background=039be5&color=fff&name=" + encodeURIComponent(session.user.name || "")} alt="" />
-                                                </button>
-                                            </div>
-                                            {
-                                                profileDropdownExpanded && (
-                                                    <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg py-1 bg-white ring-1 ring-black ring-opacity-5 focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="user-menu">
-                                                        <Link href="/settings/profile"><a className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" role="menuitem">Your Profile</a></Link>
-                                                        <Link href="/settings/password"><a className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" role="menuitem">Login &amp; Security</a></Link>
-                                                        <button onClick={logoutHandler} className="w-full text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" role="menuitem">Sign out</button>
-                                                    </div>
-                                                )
-                                            }
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="-mr-2 flex md:hidden">
-                                    <button onClick={toggleMobileMenu} type="button" className="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white" aria-controls="mobile-menu" aria-expanded="false">
-                                        <span className="sr-only">Open main menu</span>
-                                        { !mobileMenuExpanded && <MenuIcon className="block h-6 w-6" /> }
-                                        { mobileMenuExpanded && <XIcon className="block h-6 w-6" /> }
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+      <div className="z-50 absolute w-full h-screen bg-gray-50 flex items-center">
+        <Loader />
+      </div>
+    );
+  }
+  return (
+    <>
+      <HeadSeo
+        title={pageTitle ?? "Cal.com"}
+        description={props.subtitle ? props.subtitle?.toString() : ""}
+        nextSeoProps={{
+          nofollow: true,
+          noindex: true,
+        }}
+      />
+      <div>
+        <Toaster position="bottom-right" />
+      </div>
 
-                    { mobileMenuExpanded && <div className="border-b border-gray-700 md:hidden" id="mobile-menu">
-                        <div className="px-2 py-3 space-y-1 sm:px-3">
-                            <Link href="/">
-                                <a className={router.pathname == "/" ? "bg-gray-900 text-white block px-3 py-2 rounded-md text-base font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium"}>Dashboard</a>
-                            </Link>
-                            <Link href="/availability">
-                                <a className={router.pathname.startsWith("/availability") ? "bg-gray-900 text-white block px-3 py-2 rounded-md text-base font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium"}>Availability</a>
-                            </Link>
-                            <Link href="/integrations">
-                                <a className={router.pathname.startsWith("/integrations") ? "bg-gray-900 text-white block px-3 py-2 rounded-md text-base font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium"}>Integrations</a>
-                            </Link>
-                        </div>
-                        <div className="pt-4 pb-3 border-t border-gray-700">
-                            <div className="flex items-center px-5">
-                                <div className="flex-shrink-0">
-                                    <img className="h-10 w-10 rounded-full" src={"https://eu.ui-avatars.com/api/?background=039be5&color=fff&name=" + encodeURIComponent(session.user.name || session.user.username)} alt="" />
-                                </div>
-                                <div className="ml-3">
-                                    <div className="text-base font-medium leading-none text-white">{session.user.name || session.user.username}</div>
-                                    <div className="text-sm font-medium leading-none text-gray-400">{session.user.email}</div>
-                                </div>
-                            </div>
-                            <div className="mt-3 px-2 space-y-1">
-                                <Link href="/settings/profile">
-                                    <a className="block px-3 py-2 rounded-md text-base font-medium text-gray-400 hover:text-white hover:bg-gray-700">Your Profile</a>
-                                </Link>
-                                <Link href="/settings">
-                                    <a className={router.pathname.startsWith("/settings") ? "bg-gray-900 text-white block px-3 py-2 rounded-md text-base font-medium" : "text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium"}>Settings</a>
-                                </Link>
-                                <button onClick={logoutHandler} className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-gray-400 hover:text-white hover:bg-gray-700">Sign out</button>
-                            </div>
-                        </div>
-                    </div>
-                    }
+      <div className="flex h-screen overflow-hidden bg-gray-100">
+        <div className="hidden md:flex md:flex-shrink-0">
+          <div className="flex flex-col w-56">
+            <div className="flex flex-col flex-1 h-0 bg-white border-r border-gray-200">
+              <div className="flex flex-col flex-1 pt-5 pb-4 overflow-y-auto">
+                <Link href="/event-types">
+                  <a className="px-4">
+                    <Logo small />
+                  </a>
+                </Link>
+                <nav className="flex-1 px-2 mt-5 space-y-1 bg-white">
+                  {navigation.map((item) => (
+                    <Link key={item.name} href={item.href}>
+                      <a
+                        className={classNames(
+                          item.current
+                            ? "bg-neutral-100 text-neutral-900"
+                            : "text-neutral-500 hover:bg-gray-50 hover:text-neutral-900",
+                          "group flex items-center px-2 py-2 text-sm font-medium rounded-sm"
+                        )}>
+                        <item.icon
+                          className={classNames(
+                            item.current
+                              ? "text-neutral-500"
+                              : "text-neutral-400 group-hover:text-neutral-500",
+                            "mr-3 flex-shrink-0 h-5 w-5"
+                          )}
+                          aria-hidden="true"
+                        />
+                        {item.name}
+                      </a>
+                    </Link>
+                  ))}
                 </nav>
-                <header className="py-10">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                        <h1 className="text-3xl font-bold text-white">
-                            {props.heading}
-                        </h1>
-                    </div>
-                </header>
+              </div>
+              <div className="p-4 pt-2 pr-2">
+                <UserDropdown />
+              </div>
             </div>
-
-            <main className="-mt-32">
-                <div className="max-w-7xl mx-auto pb-12 px-4 sm:px-6 lg:px-8">
-                    {props.children}
-                </div>
-            </main>
+          </div>
         </div>
-);
+
+        <div className="flex flex-col flex-1 w-0 overflow-hidden">
+          <main className="flex-1 relative z-0 overflow-y-auto focus:outline-none max-w-[1700px]">
+            {/* show top navigation for md and smaller (tablet and phones) */}
+            <nav className="flex items-center justify-between p-4 bg-white shadow md:hidden">
+              <Link href="/event-types">
+                <a>
+                  <Logo />
+                </a>
+              </Link>
+              <div className="flex items-center self-center gap-3">
+                <button className="p-2 text-gray-400 bg-white rounded-full hover:text-gray-500 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black">
+                  <span className="sr-only">{t("view_notifications")}</span>
+                  <Link href="/settings/profile">
+                    <a>
+                      <CogIcon className="w-6 h-6" aria-hidden="true" />
+                    </a>
+                  </Link>
+                </button>
+                <UserDropdown small />
+              </div>
+            </nav>
+            <div className={classNames(props.centered && "md:max-w-5xl mx-auto", "py-8")}>
+              <div className="block sm:flex justify-between px-4 sm:px-6 md:px-8 min-h-[80px]">
+                <div className="w-full mb-10">
+                  <h1 className="mb-1 text-xl font-bold tracking-wide text-gray-900 font-cal">
+                    {props.heading}
+                  </h1>
+                  <p className="mr-4 text-sm text-neutral-500">{props.subtitle}</p>
+                </div>
+                <div className="flex-shrink-0 mb-4">{props.CTA}</div>
+              </div>
+              <div className="px-4 sm:px-6 md:px-8">{props.children}</div>
+              {/* show bottom navigation for md and smaller (tablet and phones) */}
+              <nav className="fixed bottom-0 flex w-full bg-white shadow bottom-nav md:hidden">
+                {/* note(PeerRich): using flatMap instead of map to remove settings from bottom nav */}
+                {navigation.flatMap((item, itemIdx) =>
+                  item.name === "Settings" ? (
+                    []
+                  ) : (
+                    <Link key={item.name} href={item.href}>
+                      <a
+                        className={classNames(
+                          item.current ? "text-gray-900" : "text-neutral-400 hover:text-gray-700",
+                          itemIdx === 0 ? "rounded-l-lg" : "",
+                          itemIdx === navigation.length - 1 ? "rounded-r-lg" : "",
+                          "group relative min-w-0 flex-1 overflow-hidden bg-white py-2 px-2 text-xs sm:text-sm font-medium text-center hover:bg-gray-50 focus:z-10"
+                        )}
+                        aria-current={item.current ? "page" : undefined}>
+                        <item.icon
+                          className={classNames(
+                            item.current ? "text-gray-900" : "text-gray-400 group-hover:text-gray-500",
+                            "block mx-auto flex-shrink-0 h-5 w-5 mb-1 text-center"
+                          )}
+                          aria-hidden="true"
+                        />
+                        <span>{item.name}</span>
+                      </a>
+                    </Link>
+                  )
+                )}
+              </nav>
+              {/* add padding to content for mobile navigation*/}
+              <div className="block pt-12 md:hidden" />
+            </div>
+            <LicenseBanner />
+          </main>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function UserDropdown({ small }: { small?: boolean }) {
+  const { t } = useLocale();
+  const query = useMeQuery();
+  const user = query.data;
+
+  return (
+    !!user && (
+      <Dropdown>
+        <DropdownMenuTrigger asChild>
+          <div className="flex items-center space-x-2 cursor-pointer group">
+            <Avatar
+              imageSrc={user.avatar}
+              alt={user.username}
+              className={classNames(
+                small ? "w-8 h-8" : "w-10 h-10",
+                "bg-gray-300 rounded-full flex-shrink-0"
+              )}
+            />
+            {!small && (
+              <>
+                <span className="flex-grow text-sm">
+                  <span className="block font-medium text-gray-900 truncate">{user.name}</span>
+                  <span className="block font-normal truncate text-neutral-500">/{user.username}</span>
+                </span>
+                <SelectorIcon
+                  className="flex-shrink-0 w-5 h-5 text-gray-400 group-hover:text-gray-500"
+                  aria-hidden="true"
+                />
+              </>
+            )}
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem>
+            <a
+              target="_blank"
+              rel="noopener noreferrer"
+              href={`${process.env.NEXT_PUBLIC_APP_URL}/${user?.username || ""}`}
+              className="flex px-4 py-2 text-sm text-neutral-500">
+              {t("view_public_page")} <ExternalLinkIcon className="w-3 h-3 mt-1 ml-1 text-neutral-400" />
+            </a>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator className="h-px bg-gray-200" />
+          <DropdownMenuItem>
+            <a
+              href="https://cal.com/slack"
+              target="_blank"
+              rel="noreferrer"
+              className="flex px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-gray-100 hover:text-gray-900">
+              <svg
+                viewBox="0 0 2447.6 2452.5"
+                className={classNames(
+                  "text-neutral-400 group-hover:text-neutral-500",
+                  "mt-0.5 mr-3 flex-shrink-0 h-4 w-4"
+                )}
+                xmlns="http://www.w3.org/2000/svg">
+                <g clipRule="evenodd" fillRule="evenodd">
+                  <path
+                    d="m897.4 0c-135.3.1-244.8 109.9-244.7 245.2-.1 135.3 109.5 245.1 244.8 245.2h244.8v-245.1c.1-135.3-109.5-245.1-244.9-245.3.1 0 .1 0 0 0m0 654h-652.6c-135.3.1-244.9 109.9-244.8 245.2-.2 135.3 109.4 245.1 244.7 245.3h652.7c135.3-.1 244.9-109.9 244.8-245.2.1-135.4-109.5-245.2-244.8-245.3z"
+                    fill="#9BA6B6"></path>
+                  <path
+                    d="m2447.6 899.2c.1-135.3-109.5-245.1-244.8-245.2-135.3.1-244.9 109.9-244.8 245.2v245.3h244.8c135.3-.1 244.9-109.9 244.8-245.3zm-652.7 0v-654c.1-135.2-109.4-245-244.7-245.2-135.3.1-244.9 109.9-244.8 245.2v654c-.2 135.3 109.4 245.1 244.7 245.3 135.3-.1 244.9-109.9 244.8-245.3z"
+                    fill="#9BA6B6"></path>
+                  <path
+                    d="m1550.1 2452.5c135.3-.1 244.9-109.9 244.8-245.2.1-135.3-109.5-245.1-244.8-245.2h-244.8v245.2c-.1 135.2 109.5 245 244.8 245.2zm0-654.1h652.7c135.3-.1 244.9-109.9 244.8-245.2.2-135.3-109.4-245.1-244.7-245.3h-652.7c-135.3.1-244.9 109.9-244.8 245.2-.1 135.4 109.4 245.2 244.7 245.3z"
+                    fill="#9BA6B6"></path>
+                  <path
+                    d="m0 1553.2c-.1 135.3 109.5 245.1 244.8 245.2 135.3-.1 244.9-109.9 244.8-245.2v-245.2h-244.8c-135.3.1-244.9 109.9-244.8 245.2zm652.7 0v654c-.2 135.3 109.4 245.1 244.7 245.3 135.3-.1 244.9-109.9 244.8-245.2v-653.9c.2-135.3-109.4-245.1-244.7-245.3-135.4 0-244.9 109.8-244.8 245.1 0 0 0 .1 0 0"
+                    fill="#9BA6B6"></path>
+                </g>
+              </svg>
+              {t("join_our_slack")}
+            </a>
+          </DropdownMenuItem>
+          <HelpMenuItemDynamic />
+          <DropdownMenuSeparator className="h-px bg-gray-200" />
+          <DropdownMenuItem>
+            <a
+              onClick={() => signOut({ callbackUrl: "/auth/logout" })}
+              className="flex px-4 py-2 text-sm font-medium cursor-pointer hover:bg-gray-100 hover:text-gray-900">
+              <LogoutIcon
+                className={classNames(
+                  "text-neutral-400 group-hover:text-neutral-500",
+                  "mr-2 flex-shrink-0 h-5 w-5"
+                )}
+                aria-hidden="true"
+              />
+              {t("sign_out")}
+            </a>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </Dropdown>
+    )
+  );
 }

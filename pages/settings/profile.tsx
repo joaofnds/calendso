@@ -1,275 +1,444 @@
-import Head from 'next/head';
-import Link from 'next/link';
-import { useRef, useState } from 'react';
-import prisma from '../../lib/prisma';
-import Modal from '../../components/Modal';
-import Shell from '../../components/Shell';
-import SettingsShell from '../../components/Settings';
-import { signIn, useSession, getSession } from 'next-auth/client';
+import { InformationCircleIcon } from "@heroicons/react/outline";
+import crypto from "crypto";
+import { GetServerSidePropsContext } from "next";
+import { i18n } from "next-i18next.config";
+import { ComponentProps, RefObject, useEffect, useRef, useState } from "react";
+import Select, { OptionTypeBase } from "react-select";
+import TimezoneSelect from "react-timezone-select";
 
-export default function Settings(props) {
-    const [ session, loading ] = useSession();
-    const [successModalOpen, setSuccessModalOpen] = useState(false);
-    const usernameRef = useRef();
-    const nameRef = useRef();
-    const descriptionRef = useRef();
-    const timezoneRef = useRef();
+import { QueryCell } from "@lib/QueryCell";
+import { asStringOrNull, asStringOrUndefined } from "@lib/asStringOrNull";
+import { getSession } from "@lib/auth";
+import { nameOfDay } from "@lib/core/i18n/weekday";
+import { useLocale } from "@lib/hooks/useLocale";
+import { isBrandingHidden } from "@lib/isBrandingHidden";
+import showToast from "@lib/notification";
+import prisma from "@lib/prisma";
+import { trpc } from "@lib/trpc";
+import { inferSSRProps } from "@lib/types/inferSSRProps";
 
-    if (loading) {
-        return <p className="text-gray-400">Loading...</p>;
-    } else {
-        if (!session) {
-            window.location.href = "/auth/login";
+import { Dialog, DialogClose, DialogContent } from "@components/Dialog";
+import ImageUploader from "@components/ImageUploader";
+import SettingsShell from "@components/SettingsShell";
+import Shell from "@components/Shell";
+import { Alert } from "@components/ui/Alert";
+import Avatar from "@components/ui/Avatar";
+import Badge from "@components/ui/Badge";
+import Button from "@components/ui/Button";
+import { UsernameInput } from "@components/ui/UsernameInput";
+
+type Props = inferSSRProps<typeof getServerSideProps>;
+
+const getLocaleOptions = (displayLocale: string | string[]): OptionTypeBase[] => {
+  return i18n.locales.map((locale) => ({
+    value: locale,
+    label: new Intl.DisplayNames(displayLocale, { type: "language" }).of(locale),
+  }));
+};
+
+function HideBrandingInput(props: { hideBrandingRef: RefObject<HTMLInputElement>; user: Props["user"] }) {
+  const { t } = useLocale();
+  const [modelOpen, setModalOpen] = useState(false);
+  return (
+    <>
+      <input
+        id="hide-branding"
+        name="hide-branding"
+        type="checkbox"
+        ref={props.hideBrandingRef}
+        defaultChecked={isBrandingHidden(props.user)}
+        className={
+          "focus:ring-neutral-500 h-4 w-4 text-neutral-900 border-gray-300 rounded-sm disabled:opacity-50"
         }
-    }
+        onClick={(e) => {
+          if (!e.currentTarget.checked || props.user.plan !== "FREE") {
+            return;
+          }
 
-    const closeSuccessModal = () => { setSuccessModalOpen(false); }
+          // prevent checking the input
+          e.preventDefault();
 
-    async function updateProfileHandler(event) {
-        event.preventDefault();
+          setModalOpen(true);
+        }}
+      />
+      <Dialog open={modelOpen}>
+        <DialogContent>
+          <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-yellow-100 rounded-full">
+            <InformationCircleIcon className="w-6 h-6 text-yellow-400" aria-hidden="true" />
+          </div>
+          <div className="mb-4 sm:flex sm:items-start">
+            <div className="mt-3 sm:mt-0 sm:text-left">
+              <h3 className="text-lg font-bold leading-6 text-gray-900 font-cal" id="modal-title">
+                {t("only_available_on_pro_plan")}
+              </h3>
+            </div>
+          </div>
+          <div className="flex flex-col space-y-3">
+            <p>{t("remove_cal_branding_description")}</p>
 
-        const enteredUsername = usernameRef.current.value;
-        const enteredName = nameRef.current.value;
-        const enteredDescription = descriptionRef.current.value;
-        const enteredTimezone = timezoneRef.current.value;
+            <p>
+              {" "}
+              {t("to_upgrade_go_to")}{" "}
+              <a href="https://cal.com/upgrade" className="underline">
+                cal.com/upgrade
+              </a>
+              .
+            </p>
+          </div>
+          <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse gap-x-2">
+            <DialogClose asChild>
+              <Button
+                className="table-cell text-center btn-wide btn-primary"
+                onClick={() => setModalOpen(false)}>
+                {t("dismiss")}
+              </Button>
+            </DialogClose>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
-        // TODO: Add validation
+function SettingsView(props: ComponentProps<typeof Settings> & { localeProp: string }) {
+  const utils = trpc.useContext();
+  const { t } = useLocale();
+  const mutation = trpc.useMutation("viewer.updateProfile", {
+    onSuccess: () => {
+      showToast(t("your_user_profile_updated_successfully"), "success");
+      setHasErrors(false); // dismiss any open errors
+    },
+    onError: (err) => {
+      setHasErrors(true);
+      setErrorMessage(err.message);
+      document?.getElementsByTagName("main")[0]?.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    async onSettled() {
+      await utils.invalidateQueries(["viewer.i18n"]);
+    },
+  });
 
-        const response = await fetch('/api/user/profile', {
-            method: 'PATCH',
-            body: JSON.stringify({username: enteredUsername, name: enteredName, description: enteredDescription, timeZone: enteredTimezone}),
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+  const localeOptions = getLocaleOptions(props.localeProp);
 
-        setSuccessModalOpen(true);
-    }
+  const themeOptions = [
+    { value: "light", label: t("light") },
+    { value: "dark", label: t("dark") },
+  ];
 
-    return(
-        <Shell heading="Profile">
-            <Head>
-                <title>Profile | Calendso</title>
-                <link rel="icon" href="/favicon.ico" />
-            </Head>
-            <SettingsShell>
-                <form className="divide-y divide-gray-200 lg:col-span-9" onSubmit={updateProfileHandler}>
-                    <div className="py-6 px-4 sm:p-6 lg:pb-8">
-                        <div>
-                            <h2 className="text-lg leading-6 font-medium text-gray-900">Profile</h2>
-                            <p className="mt-1 text-sm text-gray-500">
-                                Review and change your public page details.
-                            </p>
-                        </div>
+  const usernameRef = useRef<HTMLInputElement>(null!);
+  const nameRef = useRef<HTMLInputElement>(null!);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null!);
+  const avatarRef = useRef<HTMLInputElement>(null!);
+  const hideBrandingRef = useRef<HTMLInputElement>(null!);
+  const [selectedTheme, setSelectedTheme] = useState<OptionTypeBase>();
+  const [selectedTimeZone, setSelectedTimeZone] = useState({ value: props.user.timeZone });
+  const [selectedWeekStartDay, setSelectedWeekStartDay] = useState<OptionTypeBase>({
+    value: props.user.weekStart,
+    label: nameOfDay(props.localeProp, props.user.weekStart === "Sunday" ? 0 : 1),
+  });
 
-                        <div className="mt-6 flex flex-col lg:flex-row">
-                            <div className="flex-grow space-y-6">
-                                <div className="flex">
-                                    <div className="w-1/2 mr-2">
-                                        <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-                                            Username
-                                        </label>
-                                        <div className="mt-1 rounded-md shadow-sm flex">
-                                            <span className="bg-gray-50 border border-r-0 border-gray-300 rounded-l-md px-3 inline-flex items-center text-gray-500 sm:text-sm">
-                                                {window.location.hostname}/
-                                            </span>
-                                            <input ref={usernameRef} type="text" name="username" id="username" autoComplete="username" className="focus:ring-blue-500 focus:border-blue-500 flex-grow block w-full min-w-0 rounded-none rounded-r-md sm:text-sm border-gray-300" defaultValue={props.user.username} />
-                                        </div>
-                                    </div>
-                                    <div className="w-1/2 ml-2">
-                                        <label htmlFor="name" className="block text-sm font-medium text-gray-700">Full name</label>
-                                        <input ref={nameRef} type="text" name="name" id="name" autoComplete="given-name" placeholder="Your name" className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" defaultValue={props.user.name} />
-                                    </div>
-                                </div>
+  const [selectedLanguage, setSelectedLanguage] = useState<OptionTypeBase>({
+    value: props.localeProp,
+    label: localeOptions.find((option) => option.value === props.localeProp)?.label,
+  });
+  const [imageSrc, setImageSrc] = useState<string>(props.user.avatar || "");
+  const [hasErrors, setHasErrors] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-                                <div>
-                                    <label htmlFor="about" className="block text-sm font-medium text-gray-700">
-                                        About
-                                    </label>
-                                    <div className="mt-1">
-                                        <textarea ref={descriptionRef} id="about" name="about" placeholder="A little something about yourself." rows={3} className="shadow-sm focus:ring-blue-500 focus:border-blue-500 mt-1 block w-full sm:text-sm border-gray-300 rounded-md">{props.user.bio}</textarea>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label htmlFor="timeZone" className="block text-sm font-medium text-gray-700">
-                                        Timezone
-                                    </label>
-                                    <div className="mt-1">
-                                        <select name="timezone" id="timeZone" defaultValue={props.user.timeZone} ref={timezoneRef} className="shadow-sm focus:ring-blue-500 focus:border-blue-500 mt-1 block w-full sm:text-sm border-gray-300 rounded-md">
-                                          <option disabled style={{display: "none"}}>Time Zone...</option>
-
-                                          <optgroup label="Common">
-                                            <option value="GMT">Dublin, Edinburgh, Lisbon, London</option>
-                                            <option value="Europe/Brussels">Brussels, Copenhagen, Madrid, Paris</option>
-                                          </optgroup>
-                                          <optgroup label="America">
-                                            <option value="America/Juneau">Alaska</option>
-                                            <option value="America/Phoenix">Arizona</option>
-                                            <option value="America/Belize">Central America</option>
-                                            <option value="America/Bogota">Bogota, Lima, Quito</option>
-                                            <option value="America/Boise">Mountain Time (US and Canada)</option>
-                                            <option value="America/Argentina/Buenos_Aires">Buenos Aires, Georgetown</option>
-                                            <option value="America/Caracas">Caracas, La Paz</option>
-                                            <option value="America/Chicago">Chicago, Central Time</option>
-                                            <option value="America/Chihuahua">Chihuahua, La Paz, Mazatlan</option>
-                                            <option value="America/Dawson">Dawson</option>
-                                            <option value="America/Detroit">Detroit</option>
-                                            <option value="America/Glace_Bay">Atlantic Time, Canada</option>
-                                            <option value="America/Godthab">Greenland</option>
-                                            <option value="America/Indiana/Indianapolis">Indiana (East), Indianapolis</option>
-                                            <option value="America/Mexico_City">Guadalajara, Mexico City, Monterrey</option>
-                                            <option value="America/Regina">Saskatchewan</option>
-                                            <option value="America/Santiago">Santiago</option>
-                                            <option value="America/Sao_Paulo">Sao Paulo, Brasilia</option>
-                                            <option value="America/St_Johns">Newfoundland and Labrador</option>
-                                          </optgroup>
-
-                                          <optgroup label="Europe">
-                                            <option value="Europe/Amsterdam">Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna</option>
-                                            <option value="Europe/Athens">Athens, Istanbul, Minsk</option>
-                                            <option value="Europe/Belgrade">Belgrade, Bratislava, Budapest, Ljubljana, Prague</option>
-                                            <option value="Europe/Brussels">Brussels, Copenhagen, Madrid, Paris</option>
-                                            <option value="Europe/Bucharest">Bucharest</option>
-                                            <option value="GMT">Dublin, Edinburgh, Lisbon, London</option>
-                                            <option value="Europe/Helsinki">Helsinki, Kiev, Riga, Sofia, Tallinn, Vilnius</option>
-                                            <option value="Europe/Moscow">Moscow, St. Petersburg, Volgograd</option>
-                                          </optgroup>
-
-                                          <optgroup label="Asia">
-                                            <option value="Asia/Almaty">Almaty, Novosibirsk</option>
-                                            <option value="Asia/Baghdad">Baghdad</option>
-                                            <option value="Asia/Baku">Baku, Tbilisi, Yerevan</option>
-                                            <option value="Asia/Bangkok">Bangkok, Hanoi, Jakarta</option>
-                                            <option value="Asia/Colombo">Sri Jayawardenepura</option>
-                                            <option value="Asia/Dhaka">Dhaka, Astana</option>
-                                            <option value="Asia/Dubai">Abu Dhabi, Muscat</option>
-                                            <option value="Asia/Irkutsk">Irkutsk, Ulaanbaatar</option>
-                                            <option value="Asia/Jerusalem">Jerusalem</option>
-                                            <option value="Asia/Kabul">Kabul</option>
-                                            <option value="Asia/Karachi">Karachi, Islamabad, Tashkent</option>
-                                            <option value="Asia/Kolkata">Kolkata, Chennai, Mumbai, New Delphi</option>
-                                            <option value="Asia/Krasnoyarsk">Krasnoyarsk</option>
-                                            <option value="Asia/Kuala_Lumpur">Kuala Lumpur, Singapore</option>
-                                            <option value="Asia/Kuwait">Kuwait</option>
-                                            <option value="Asia/Magadan">Magadan, Solomon Islands, New Caledonia</option>
-                                            <option value="Asia/Rangoon">Yangon Rangoon</option>
-                                            <option value="Asia/Seoul">Seoul</option>
-                                            <option value="Asia/Shanghai">Beijing, Chongqing, Hong Kong SAR, Urumqi</option>
-                                            <option value="Asia/Tehran">Tehran</option>
-                                            <option value="Asia/Tokyo">Tokyo, Osaka, Sapporo</option>
-                                            <option value="Asia/Vladivostok">Vladivostok</option>
-                                            <option value="Asia/Yakutsk">Yakutsk</option>
-                                            <option value="Asia/Yekaterinburg">Yekaterinburg</option>
-                                          </optgroup>
-
-                                          <optgroup label="Africa">
-                                            <option value="Africa/Cairo">Cairo</option>
-                                            <option value="Africa/Casablanca">Casablanca, Monrovia</option>
-                                            <option value="Africa/Algiers">West Central Africa</option>
-                                            <option value="Africa/Harare">Harare, Pretoria</option>
-                                            <option value="Africa/Nairobi">Nairobi</option>
-                                          </optgroup>
-
-                                          <optgroup label="Australia">
-                                            <option value="Australia/Adelaide">Adelaide</option>
-                                            <option value="Australia/Brisbane">Brisbane</option>
-                                            <option value="Australia/Darwin">Darwin</option>
-                                            <option value="Australia/Hobart">Hobart, Tasmania</option>
-                                            <option value="Australia/Perth">Perth</option>
-                                            <option value="Australia/Sydney">Sydney, Melbourne, Canberra</option>
-                                          </optgroup>
-
-                                          <optgroup label="Atlantic">
-                                            <option value="Atlantic/Azores">Azores</option>
-                                            <option value="Atlantic/Cape_Verde">Cape Verde Islands</option>
-                                            <option value="Atlantic/Canary">Canary Islands</option>
-                                            <option value="Etc/GMT+2">Mid-Atlantic</option>
-                                          </optgroup>
-
-                                          <optgroup label="Pacific">
-                                            <option value="Pacific/Auckland">Auckland, Wellington</option>
-                                            <option value="Pacific/Fiji">Fiji Islands, Kamchatka, Marshall Islands</option>
-                                            <option value="Pacific/Guam">Guam, Port Moresby</option>
-                                            <option value="Pacific/Tongatapu">Nuku'alofa</option>
-                                          </optgroup>
-
-                                          <optgroup label="Antarctica">
-                                            <option value="Antarctica/McMurdo">McMurdo, South Pole</option>
-                                          </optgroup>
-
-                                        </select>
-                                    </div>
-                                </div>
-                                </div>
-
-                                <div className="mt-6 flex-grow lg:mt-0 lg:ml-6 lg:flex-grow-0 lg:flex-shrink-0">
-                                <p className="mb-2 text-sm font-medium text-gray-700" aria-hidden="true">
-                                    Photo
-                                </p>
-                                <div className="mt-1 lg:hidden">
-                                    <div className="flex items-center">
-                                        <div className="flex-shrink-0 inline-block rounded-full overflow-hidden h-12 w-12" aria-hidden="true">
-                                            <img className="rounded-full h-full w-full" src={props.user.avatar} alt="" />
-                                        </div>
-                                        <div className="ml-5 rounded-md shadow-sm">
-                                            <div className="group relative border border-gray-300 rounded-md py-2 px-3 flex items-center justify-center hover:bg-gray-50 focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
-                                                <label htmlFor="user_photo" className="relative text-sm leading-4 font-medium text-gray-700 pointer-events-none">
-                                                    <span>Change</span>
-                                                    <span className="sr-only"> user photo</span>
-                                                </label>
-                                                <input id="user_photo" name="user_photo" type="file" className="absolute w-full h-full opacity-0 cursor-pointer border-gray-300 rounded-md" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="hidden relative rounded-full overflow-hidden lg:block">
-                                    {props.user.avatar && <img className="relative rounded-full w-40 h-40" src={props.user.avatar} alt="" />}
-                                    {!props.user.avatar && <div className="relative bg-blue-600 rounded-full w-40 h-40"></div>}
-                                    <label htmlFor="user-photo" className="absolute inset-0 w-full h-full bg-black bg-opacity-75 flex items-center justify-center text-sm font-medium text-white opacity-0 hover:opacity-100 focus-within:opacity-100">
-                                        <span>Change</span>
-                                        <span className="sr-only"> user photo</span>
-                                        <input type="file" id="user-photo" name="user-photo" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer border-gray-300 rounded-md" />
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        <hr className="mt-8" />
-                        <div className="py-4 flex justify-end">
-                            <button type="button" className="bg-white border border-gray-300 rounded-md shadow-sm py-2 px-4 inline-flex justify-center text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                Cancel
-                            </button>
-                            <button type="submit" className="ml-2 bg-blue-600 border border-transparent rounded-md shadow-sm py-2 px-4 inline-flex justify-center text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                Save
-                            </button>
-                        </div>
-                    </div>
-                </form>
-                <Modal heading="Profile updated successfully" description="Your user profile has been updated successfully." open={successModalOpen} handleClose={closeSuccessModal} />
-            </SettingsShell>
-        </Shell>
+  useEffect(() => {
+    setSelectedTheme(
+      props.user.theme ? themeOptions.find((theme) => theme.value === props.user.theme) : undefined
     );
-}
+  }, []);
 
-export async function getServerSideProps(context) {
-    const session = await getSession(context);
+  async function updateProfileHandler(event) {
+    event.preventDefault();
 
-    const user = await prisma.user.findFirst({
-        where: {
-            email: session.user.email,
-        },
-        select: {
-            id: true,
-            username: true,
-            name: true,
-            email: true,
-            bio: true,
-            avatar: true,
-            timeZone: true,
-        }
+    const enteredUsername = usernameRef.current.value.toLowerCase();
+    const enteredName = nameRef.current.value;
+    const enteredDescription = descriptionRef.current.value;
+    const enteredAvatar = avatarRef.current.value;
+    const enteredTimeZone = selectedTimeZone.value;
+    const enteredWeekStartDay = selectedWeekStartDay.value;
+    const enteredHideBranding = hideBrandingRef.current.checked;
+    const enteredLanguage = selectedLanguage.value;
+
+    // TODO: Add validation
+
+    mutation.mutate({
+      username: enteredUsername,
+      name: enteredName,
+      bio: enteredDescription,
+      avatar: enteredAvatar,
+      timeZone: enteredTimeZone,
+      weekStart: asStringOrUndefined(enteredWeekStartDay),
+      hideBranding: enteredHideBranding,
+      theme: asStringOrNull(selectedTheme?.value),
+      locale: enteredLanguage,
     });
+  }
 
-    return {
-      props: {user}, // will be passed to the page component as props
-    }
+  return (
+    <form className="divide-y divide-gray-200 lg:col-span-9" onSubmit={updateProfileHandler}>
+      {hasErrors && <Alert severity="error" title={errorMessage} />}
+      <div className="py-6 lg:pb-8">
+        <div className="flex flex-col lg:flex-row">
+          <div className="flex-grow space-y-6">
+            <div className="block sm:flex">
+              <div className="w-full mb-6 sm:w-1/2 sm:mr-2">
+                <UsernameInput ref={usernameRef} defaultValue={props.user.username} />
+              </div>
+              <div className="w-full sm:w-1/2 sm:ml-2">
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                  {t("full_name")}
+                </label>
+                <input
+                  ref={nameRef}
+                  type="text"
+                  name="name"
+                  id="name"
+                  autoComplete="given-name"
+                  placeholder={t("your_name")}
+                  required
+                  className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-sm shadow-sm focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 sm:text-sm"
+                  defaultValue={props.user.name}
+                />
+              </div>
+            </div>
+
+            <div className="block sm:flex">
+              <div className="w-full mb-6 sm:w-1/2 sm:mr-2">
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                  {t("email")}
+                </label>
+                <input
+                  type="text"
+                  name="email"
+                  id="email"
+                  placeholder={t("your_email")}
+                  disabled
+                  className="block w-full px-3 py-2 mt-1 text-gray-500 border border-gray-300 rounded-l-sm bg-gray-50 sm:text-sm"
+                  defaultValue={props.user.email}
+                />
+                <p className="mt-2 text-sm text-gray-500" id="email-description">
+                  {t("change_email_contact")}{" "}
+                  <a className="text-blue-500" href="mailto:help@cal.com">
+                    help@cal.com
+                  </a>
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="about" className="block text-sm font-medium text-gray-700">
+                {t("about")}
+              </label>
+              <div className="mt-1">
+                <textarea
+                  ref={descriptionRef}
+                  id="about"
+                  name="about"
+                  placeholder={t("little_something_about")}
+                  rows={3}
+                  defaultValue={props.user.bio || undefined}
+                  className="block w-full mt-1 border-gray-300 rounded-sm shadow-sm focus:ring-neutral-500 focus:border-neutral-500 sm:text-sm"></textarea>
+              </div>
+            </div>
+            <div>
+              <div className="flex mt-1">
+                <Avatar
+                  displayName={props.user.name}
+                  className="relative w-10 h-10 rounded-full"
+                  gravatarFallbackMd5={props.user.emailMd5}
+                  imageSrc={imageSrc}
+                />
+                <input
+                  ref={avatarRef}
+                  type="hidden"
+                  name="avatar"
+                  id="avatar"
+                  placeholder="URL"
+                  className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-sm shadow-sm focus:outline-none focus:ring-neutral-500 focus:border-neutral-500 sm:text-sm"
+                  defaultValue={imageSrc}
+                />
+                <ImageUploader
+                  target="avatar"
+                  id="avatar-upload"
+                  buttonMsg={t("change_avatar")}
+                  handleAvatarChange={(newAvatar) => {
+                    avatarRef.current.value = newAvatar;
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                      window.HTMLInputElement.prototype,
+                      "value"
+                    ).set;
+                    nativeInputValueSetter.call(avatarRef.current, newAvatar);
+                    const ev2 = new Event("input", { bubbles: true });
+                    avatarRef.current.dispatchEvent(ev2);
+                    updateProfileHandler(ev2);
+                    setImageSrc(newAvatar);
+                  }}
+                  imageSrc={imageSrc}
+                />
+              </div>
+              <hr className="mt-6" />
+            </div>
+            <div>
+              <label htmlFor="language" className="block text-sm font-medium text-gray-700">
+                {t("language")}
+              </label>
+              <div className="mt-1">
+                <Select
+                  id="languageSelect"
+                  value={selectedLanguage || props.localeProp}
+                  onChange={setSelectedLanguage}
+                  classNamePrefix="react-select"
+                  className="block w-full mt-1 capitalize border border-gray-300 rounded-sm shadow-sm react-select-container focus:ring-neutral-500 focus:border-neutral-500 sm:text-sm"
+                  options={localeOptions}
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="timeZone" className="block text-sm font-medium text-gray-700">
+                {t("timezone")}
+              </label>
+              <div className="mt-1">
+                <TimezoneSelect
+                  id="timeZone"
+                  value={selectedTimeZone}
+                  onChange={setSelectedTimeZone}
+                  classNamePrefix="react-select"
+                  className="block w-full mt-1 border border-gray-300 rounded-sm shadow-sm react-select-container focus:ring-neutral-500 focus:border-neutral-500 sm:text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="weekStart" className="block text-sm font-medium text-gray-700">
+                {t("first_day_of_week")}
+              </label>
+              <div className="mt-1">
+                <Select
+                  id="weekStart"
+                  value={selectedWeekStartDay}
+                  onChange={setSelectedWeekStartDay}
+                  classNamePrefix="react-select"
+                  className="block w-full mt-1 capitalize border border-gray-300 rounded-sm shadow-sm react-select-container focus:ring-neutral-500 focus:border-neutral-500 sm:text-sm"
+                  options={[
+                    { value: "Sunday", label: nameOfDay(props.localeProp, 0) },
+                    { value: "Monday", label: nameOfDay(props.localeProp, 1) },
+                  ]}
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="theme" className="block text-sm font-medium text-gray-700">
+                {t("single_theme")}
+              </label>
+              <div className="my-1">
+                <Select
+                  id="theme"
+                  isDisabled={!selectedTheme}
+                  defaultValue={selectedTheme || themeOptions[0]}
+                  value={selectedTheme || themeOptions[0]}
+                  onChange={setSelectedTheme}
+                  className="shadow-sm | { value: string } focus:ring-neutral-500 focus:border-neutral-500 mt-1 block w-full sm:text-sm border-gray-300 rounded-sm"
+                  options={themeOptions}
+                />
+              </div>
+              <div className="relative flex items-start mt-8">
+                <div className="flex items-center h-5">
+                  <input
+                    id="theme-adjust-os"
+                    name="theme-adjust-os"
+                    type="checkbox"
+                    onChange={(e) => setSelectedTheme(e.target.checked ? null : themeOptions[0])}
+                    checked={!selectedTheme}
+                    className="w-4 h-4 border-gray-300 rounded-sm focus:ring-neutral-500 text-neutral-900"
+                  />
+                </div>
+                <div className="ml-3 text-sm">
+                  <label htmlFor="theme-adjust-os" className="font-medium text-gray-700">
+                    {t("automatically_adjust_theme")}
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="relative flex items-start">
+                <div className="flex items-center h-5">
+                  <HideBrandingInput user={props.user} hideBrandingRef={hideBrandingRef} />
+                </div>
+                <div className="ml-3 text-sm">
+                  <label htmlFor="hide-branding" className="font-medium text-gray-700">
+                    {t("disable_cal_branding")}{" "}
+                    {props.user.plan !== "PRO" && <Badge variant="default">PRO</Badge>}
+                  </label>
+                  <p className="text-gray-500">{t("disable_cal_branding_description")}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <hr className="mt-8" />
+        <div className="flex justify-end py-4">
+          <Button type="submit">{t("save")}</Button>
+        </div>
+      </div>
+    </form>
+  );
 }
+
+export default function Settings(props: Props) {
+  const { t } = useLocale();
+  const query = trpc.useQuery(["viewer.i18n"]);
+
+  return (
+    <Shell heading={t("profile")} subtitle={t("edit_profile_info_description")}>
+      <SettingsShell>
+        <QueryCell
+          query={query}
+          success={({ data }) => <SettingsView {...props} localeProp={data.locale} />}
+        />
+      </SettingsShell>
+    </Shell>
+  );
+}
+
+export const getServerSideProps = async (context: GetServerSidePropsContext) => {
+  const session = await getSession(context);
+
+  if (!session?.user?.id) {
+    return { redirect: { permanent: false, destination: "/auth/login" } };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: session.user.id,
+    },
+    select: {
+      id: true,
+      username: true,
+      name: true,
+      email: true,
+      bio: true,
+      avatar: true,
+      timeZone: true,
+      weekStart: true,
+      hideBranding: true,
+      theme: true,
+      plan: true,
+    },
+  });
+
+  if (!user) {
+    throw new Error("User seems logged in but cannot be found in the db");
+  }
+
+  return {
+    props: {
+      user: {
+        ...user,
+        emailMd5: crypto.createHash("md5").update(user.email).digest("hex"),
+      },
+    },
+  };
+};
